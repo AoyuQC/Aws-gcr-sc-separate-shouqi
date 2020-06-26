@@ -1,1 +1,1 @@
-# shouqi
+# separate application
