@@ -53,7 +53,7 @@ def overlap_and_add(signal, frame_step):
     return result
 
 
-def remove_pad(inputs, inputs_lengths):
+def remove_pad_local_cuda(inputs, inputs_lengths):
     """
     Args:
         inputs: torch.Tensor, [B, C, T] or [B, T], B is batch size
@@ -70,6 +70,25 @@ def remove_pad(inputs, inputs_lengths):
             results.append(input[:,:length].view(C, -1).cpu().numpy())
         elif dim == 2:  # [B, T]
             results.append(input[:length].view(-1).cpu().numpy())
+    return results
+
+def remove_pad(inputs, inputs_lengths):
+    """
+    Args:
+        inputs: torch.Tensor, [B, C, T] or [B, T], B is batch size
+        inputs_lengths: torch.Tensor, [B]
+    Returns:
+        results: a list containing B items, each item is [C, T], T varies
+    """
+    results = []
+    dim = inputs.dim()
+    if dim == 3:
+        C = inputs.size(1)
+    for input, length in zip(inputs, inputs_lengths):
+        if dim == 3: # [B, C, T]
+            results.append(input[:,:length].view(C, -1).numpy())
+        elif dim == 2:  # [B, T]
+            results.append(input[:length].view(-1).numpy())
     return results
 
 
@@ -213,6 +232,24 @@ def separate_process(x, predictor):
     mixtures_pad = pad_list([torch.from_numpy(x).float()], pad_value)
     ilens = torch.from_numpy(ilens) 
     mixture_np = mixtures_pad.numpy()
+    # mix_lengths = ilens.cuda()
+    mix_lengths = ilens
+    # Forward
+    response = predictor.predict(mixture_np)
+    response = torch.from_numpy(response) 
+    # estimate_source = response.cuda()
+    estimate_source = response
+    flat_estimate = remove_pad(estimate_source, mix_lengths)
+    return flat_estimate[0]
+
+def separate_process_local_cuda(x, predictor):
+    ilens = np.array([x.shape[0]])
+
+    # perform padding and convert to tensor
+    pad_value = 0
+    mixtures_pad = pad_list([torch.from_numpy(x).float()], pad_value)
+    ilens = torch.from_numpy(ilens) 
+    mixture_np = mixtures_pad.numpy()
     mix_lengths = ilens.cuda()
     # Forward
     response = predictor.predict(mixture_np)
@@ -222,7 +259,7 @@ def separate_process(x, predictor):
     estimate_source = response.cuda()
     # Remove padding and flat
 #     print(estimate_source)
-    flat_estimate = remove_pad(estimate_source, mix_lengths)
+    flat_estimate = remove_pad_local_cuda(estimate_source, mix_lengths)
 
 #     with torch.no_grad():
 #         mixture, mix_lengths = mixtures_pad.cuda(), ilens.cuda()
